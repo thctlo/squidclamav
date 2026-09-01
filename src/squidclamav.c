@@ -963,35 +963,41 @@ static int build_mime_email(int fd, const char *content_type, char **out, size_t
         if (gb_puts(&gb, delim) < 0) goto fail;
         if (gb_puts(&gb, "\r\n") < 0) goto fail;
 
+        /*
+         * Re-emit the original part headers, dropping Content-Disposition
+         * (forced to attachment below: libclamav skips parts declared
+         * form-data, issue #58) and, when re-encoding, the original
+         * Content-Transfer-Encoding.
+         */
+        if (hdr_len) {
+            const char *h = part_hdrs;
+            size_t hl = hdr_len;
+            while (hl > 0) {
+                const char *eol = mem_find(h, hl, "\n", 1);
+                size_t linelen = eol ? (size_t)(eol - h + 1) : hl;
+                size_t cmplen = eol ? (size_t)(eol - h) : hl;
+                if (!((cmplen >= 19 && strncasecmp(h, "Content-Disposition", 19) == 0) ||
+                      (!already_safe && cmplen >= 25 &&
+                       strncasecmp(h, "Content-Transfer-Encoding", 25) == 0))) {
+                    if (gb_append(&gb, h, linelen) < 0) goto fail;
+                }
+                if (!eol)
+                    break;
+                h += linelen;
+                hl = (size_t)((part_hdrs + hdr_len) - h);
+            }
+            /* Make sure the header block is CRLF-terminated. */
+            if (gb.len >= 2 && !(gb.data[gb.len - 2] == '\r' && gb.data[gb.len - 1] == '\n')) {
+                if (gb_puts(&gb, "\r\n") < 0) goto fail;
+            }
+        }
+        if (gb_puts(&gb, "Content-Disposition: attachment\r\n") < 0) goto fail;
         if (already_safe) {
-            /* Pass the part through verbatim: it is already line-safe. */
-            if (gb_append(&gb, part_hdrs, hdr_len) < 0) goto fail;
-            if (gb_puts(&gb, "\r\n\r\n") < 0) goto fail;
+            /* Already line-safe: pass the body through unchanged. */
+            if (gb_puts(&gb, "\r\n") < 0) goto fail;
             if (gb_append(&gb, part_body, part_body_len) < 0) goto fail;
             if (gb_puts(&gb, "\r\n") < 0) goto fail;
         } else {
-            /* Re-emit the original headers minus any Content-Transfer-Encoding,
-             * force base64, then base64-encode the raw body. */
-            if (hdr_len) {
-                const char *h = part_hdrs;
-                size_t hl = hdr_len;
-                while (hl > 0) {
-                    const char *eol = mem_find(h, hl, "\n", 1);
-                    size_t linelen = eol ? (size_t)(eol - h + 1) : hl;
-                    size_t cmplen = eol ? (size_t)(eol - h) : hl;
-                    if (!(cmplen >= 25 && strncasecmp(h, "Content-Transfer-Encoding", 25) == 0)) {
-                        if (gb_append(&gb, h, linelen) < 0) goto fail;
-                    }
-                    if (!eol)
-                        break;
-                    h += linelen;
-                    hl = (size_t)((part_hdrs + hdr_len) - h);
-                }
-                /* Make sure the header block is CRLF-terminated. */
-                if (gb.len >= 2 && !(gb.data[gb.len - 2] == '\r' && gb.data[gb.len - 1] == '\n')) {
-                    if (gb_puts(&gb, "\r\n") < 0) goto fail;
-                }
-            }
             if (gb_puts(&gb, "Content-Transfer-Encoding: base64\r\n\r\n") < 0) goto fail;
             if (gb_append_base64(&gb, (const unsigned char *) part_body, part_body_len) < 0) goto fail;
         }
