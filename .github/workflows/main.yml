@@ -388,6 +388,8 @@ jobs:
           echo "=== Uploads (REQMOD) ==="
           run_case "clean upload (multipart)"  clean   "$O/upload/clean"  -F "file=@$WORK/payloads/clean.txt"
           run_case "EICAR upload (multipart)"  blocked "$O/upload/eicar"  -F "file=@$WORK/payloads/eicar.com"
+          # *** issue #58 regression guard: text/plain via multipart/form-data ***
+          run_case "EICAR upload (mp text/plain)" blocked "$O/upload/eicar-txt" -F "file=@$WORK/payloads/eicar.com;type=text/plain"
           # *** issue #58 regression guard: binary NUL-heavy file via multipart/form-data ***
           run_case "binary virus upload (mp) #58" blocked "$O/upload/binnul" -F "file=@$WORK/payloads/binnul.bin"
           run_case "binary virus upload (raw)" blocked "$O/upload/binraw" -H "Content-Type: application/octet-stream" --data-binary "@$WORK/payloads/binnul.bin"
